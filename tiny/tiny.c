@@ -53,7 +53,9 @@ void doit(int fd){
   rio_t rio;
 
   Rio_readinitb(&rio, fd);
-  Rio_readlineb(&rio, buf, MAXLINE);
+  if(!Rio_readlineb(&rio, buf, MAXLINE)){
+    return;
+  }
   printf("Request headers:\n");
   printf("%s", buf);
   sscanf(buf, "%s %s %s", method, uri, version);
@@ -71,10 +73,11 @@ void doit(int fd){
   }
 
   if(is_static){
-    if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
-      clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read the file");
-      return;
+   if (!(S_ISREG(sbuf.st_mode)) || !(S_IRUSR & sbuf.st_mode)) {
+        clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't read the file");
+        return;
     }
+    serve_static(fd, filename, sbuf.st_size);
   }else{
     if(!(S_ISREG(sbuf.st_mode)) || !(S_IXUSR & sbuf.st_mode)){
       clienterror(fd, filename, "403", "Forbidden", "Tiny couldn't run the CGI program");
@@ -100,7 +103,7 @@ void read_requesthdrs(rio_t *rp) {
     return; // 함수 끝 (실제로는 아무 일도 안 하고 헤더만 소모함)
 }
 
-int parse_url(char *uri, char *filename, char *cgiargs) {
+int parse_uri(char *uri, char *filename, char *cgiargs) {
     char *ptr;
 
     // [정적 콘텐츠 처리] - "cgi-bin"이 없으면 정적 파일로 처리
