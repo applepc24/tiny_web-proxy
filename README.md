@@ -46,8 +46,3 @@ nop-server.py
 
 tiny
     Tiny Web server from the CS:APP text
-<<<<<<< HEAD
-
-=======
-    
->>>>>>> 8b24c52 (TINY 웹서버 구현완료)
