@@ -36,66 +36,94 @@ int main(int argc, char **argv)
 void handle_client(int clientfd){
   rio_t request_rio, response_rio;
   char request_buf[MAXLINE];
-  char method[MAXLINE], uri[MAXLINE];
+  char method[MAXLINE] = {0}, uri[MAXLINE] = {0};
   char hostname[MAXLINE], port[MAXLINE], path[MAXLINE];
 
-  // 요청 라인 읽기
   Rio_readinitb(&request_rio, clientfd);
-  if(!Rio_readlineb(&request_rio, request_buf, MAXLINE)){
+
+  // 요청 라인 읽기
+  if (!Rio_readlineb(&request_rio, request_buf, MAXLINE)) {
     return;
   }
-  printf("Request headers: \n%s" , request_buf);
+  printf("Request headers: \n%s", request_buf);
 
-  // method, uri 파싱
-  sscanf(request_buf, "%s %s", method, uri);
+  // method와 uri 파싱 & 검사
+  if (sscanf(request_buf, "%s %s", method, uri) != 2 || strlen(uri) == 0) {
+    clienterror(clientfd, request_buf, "400", "Bad Request", "Malformed or empty request line");
+    return;
+  }
+
+  printf("[DEBUG] Parsed method: %s, uri: %s\n", method, uri);
+
+  // 지원하지 않는 메서드인 경우
+  if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")) {
+    clienterror(clientfd, method, "501", "Not implemented", "Proxy does not implement this method");
+    return;
+  }
+
+  // URI 파싱
   parse_uri(uri, hostname, port, path);
+  printf("[DEBUG] Parsed host: %s, port: %s, path: %s\n", hostname, port, path);
 
   // 서버와 연결 시도
   int serverfd = Open_clientfd(hostname, port);
-  if (strcasecmp(method, "GET") && strcasecmp(method, "HEAD")){
-    clienterror(clientfd, method, "501", "Not implemented", "Tiny does not implement this method");
+  if (serverfd < 0) {
+    clienterror(clientfd, hostname, "502", "Bad Gateway", "Connection failed");
     return;
   }
-  // 요청 라인 재구성후 서버로 전송
+
+  // 요청 라인 재구성 후 서버로 전송
   sprintf(request_buf, "%s %s HTTP/1.0\r\n", method, path);
   Rio_writen(serverfd, request_buf, strlen(request_buf));
 
   // 나머지 요청 헤더도 서버로 전송
   read_requesthdrs(&request_rio, serverfd, hostname);
-  
-  // 응답을 받아 클라이언트에게 그대로 전달
+
+  // 응답을 클라이언트에게 그대로 전달
   Rio_readinitb(&response_rio, serverfd);
   size_t n;
-  while ((n = Rio_readlineb(&response_rio, request_buf, MAXLINE)) > 0)
-  {
+  while ((n = Rio_readlineb(&response_rio, request_buf, MAXLINE)) > 0) {
     Rio_writen(clientfd, request_buf, n);
   }
-  
+
+  Close(serverfd);
 }
 
-void parse_uri(char *uri, char *hostname, char *port, char *path){
-  int is_local_test = 1;
+void parse_uri(char *uri, char *hostname, char *port, char *path) {
+    if (!uri || strlen(uri) == 0) {
+        fprintf(stderr, "[ERROR] parse_uri: null or empty uri!\n");
+        strcpy(hostname, "");
+        strcpy(port, "80");
+        strcpy(path, "/");
+        return;
+    }
 
-  char *hostname_ptr = strstr(uri, "//") ? strstr(uri, "//") + 2 : uri;
-  char *port_ptr = strstr(hostname_ptr, ':');
-  char *path_ptr = strchr(hostname_ptr, '/');
+    char *hostname_ptr = strstr(uri, "//");
+    if (hostname_ptr) {
+        hostname_ptr += 2;
+    } else {
+        hostname_ptr = uri;
+    }
 
-  if(path_ptr){
-    strcpy(path, path_ptr);
-  }else{
-    strcpy(path, "/");
-  }
+    char *port_ptr = strchr(hostname_ptr, ':');
+    char *path_ptr = strchr(hostname_ptr, '/');
 
-  if(port_ptr){
-    strncpy(port, port_ptr +1, path_ptr - port_ptr -1);
-    port[path_ptr - port_ptr -1] = '\0';
-    strncpy(hostname, hostname_ptr, port_ptr - hostname_ptr);
-    hostname[port_ptr - hostname_ptr] = '\0';
-  }else{
-    strcpy(port, is_local_test ? "80" : "8000");
-    strncpy(hostname, hostname_ptr, path_ptr - hostname_ptr);
-    hostname[path_ptr - hostname_ptr] = '\0';
-  }
+    if (path_ptr) {
+        strcpy(path, path_ptr);
+    } else {
+        strcpy(path, "/");
+    }
+
+    if (port_ptr && port_ptr < path_ptr) {
+        strncpy(port, port_ptr + 1, path_ptr - port_ptr - 1);
+        port[path_ptr - port_ptr - 1] = '\0';
+        strncpy(hostname, hostname_ptr, port_ptr - hostname_ptr);
+        hostname[port_ptr - hostname_ptr] = '\0';
+    } else {
+        strcpy(port, "80");
+        strncpy(hostname, hostname_ptr, path_ptr - hostname_ptr);
+        hostname[path_ptr - hostname_ptr] = '\0';
+    }
 }
 
 void read_requesthdrs(rio_t *rp, int serverfd, char *hostname){
