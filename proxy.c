@@ -17,6 +17,7 @@ int total_cache_size = 0;
 #define MAX_CACHE_SIZE 1049000
 #define MAX_OBJECT_SIZE 102400
 
+void *thread(void *vargp);
 web_object_t *find_cache(char *path);
 void send_cache(web_object_t *web_object, int clientfd);
 void read_cache(web_object_t *web_object);
@@ -30,9 +31,10 @@ static const char *user_agent_hdr =
 
 int main(int argc, char **argv)
 {
-  int listenfd, clientfd;
+  int listenfd, *connfdp;
   socklen_t clientlen;
   struct sockaddr_storage clientaddr;
+  pthread_t tid;
 
   if(argc != 2){
     fprintf(stderr, "usage: %s <port>\n", argv[0]);
@@ -43,10 +45,20 @@ int main(int argc, char **argv)
 
   while(1) {
     clientlen = sizeof(clientaddr);
-    clientfd = Accept(listenfd, (SA *)&clientaddr, &clientlen);
-    handle_client(clientfd);
-    Close(clientfd);
+    connfdp = Malloc(sizeof(int));
+    *connfdp = Accept(listenfd, (SA *)&clientaddr, &clientlen);
+    Pthread_create(&tid, NULL, thread, connfdp);
   }
+}
+
+void *thread(void *vargp){
+  int connfd = *((int *)vargp);
+  Pthread_detach(pthread_self());
+  Free(vargp);
+
+  handle_client(connfd);
+  Close(connfd);
+  return NULL;
 }
 
 void handle_client(int clientfd) {
